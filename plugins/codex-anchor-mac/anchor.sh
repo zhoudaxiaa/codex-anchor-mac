@@ -105,12 +105,13 @@ while IFS= read -r issue; do
   [ -n "$issue" ] && log "WARN  $issue"
 done < <(self_check 2>/dev/null)
 
-PROMPT='Read README.md in the current directory and print only its first 100 characters. Do nothing else.'
+EXPECTED_REPLY='ok'
+PROMPT='回复ok'
 
 # Read persisted options as separate arguments; never evaluate config as shell.
 # Missing settings preserve the original default-model + low behavior.
 if ! EXEC_ARGS_TEXT="$(/usr/bin/python3 - "$DIR/config.json" "$CODEX" <<'PYEXEC'
-import json, pathlib, sys
+import json, os, pathlib, subprocess, sys
 path = pathlib.Path(sys.argv[1])
 try:
     cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -127,7 +128,61 @@ try:
     if effort:
         print("-c")
         print("model_reasoning_effort=" + json.dumps(effort))
-except (OSError, ValueError, AttributeError) as exc:
+    # Ask the CLI to parse effective configuration, including quoted keys and
+    # inline tables. Listing servers does not start a model request.
+    discovery = subprocess.run([sys.argv[2], "mcp", "list", "--json"],
+                               cwd=str(path.parent), capture_output=True, text=True, timeout=30)
+    if discovery.returncode:
+        raise ValueError("cannot read effective MCP configuration")
+    servers = json.loads(discovery.stdout)
+    if not isinstance(servers, list) or any(
+            not isinstance(s, dict) or not isinstance(s.get("name"), str) for s in servers):
+        raise ValueError("invalid MCP configuration response")
+    entries = []
+    for server in sorted(servers, key=lambda item: item["name"]):
+        # Preserve transport kind: CLI overrides merge with existing fields,
+        # so replacing an HTTP transport with a dummy command is invalid.
+        transport = server.get("transport", {})
+        if not isinstance(transport, dict):
+            raise ValueError("invalid MCP transport")
+        kind = transport.get("type")
+        key = {"stdio": "command", "streamable_http": "url"}.get(kind)
+        if key is None or not isinstance(transport.get(key), str) or not transport[key]:
+            raise ValueError("unsupported MCP transport")
+        entries.append(json.dumps(server["name"], ensure_ascii=False) +
+                       "={enabled=false," + key + "=" +
+                       json.dumps(transport[key], ensure_ascii=False) + "}")
+    if entries:
+        # A whole table also supports server names containing literal dots.
+        print("-c")
+        print("mcp_servers={" + ",".join(entries) + "}")
+    # Disable local/system skill catalogues only for this invocation. Walk
+    # symlinked skill folders too, with a visited set to avoid directory cycles.
+    codex_home = pathlib.Path(os.environ.get("CODEX_HOME", str(pathlib.Path.home() / ".codex")))
+    roots = [codex_home / "skills", pathlib.Path("/etc/codex/skills")]
+    roots += [parent / ".agents" / "skills" for parent in [path.parent, *path.parent.parents]]
+    roots.append(pathlib.Path.home() / ".agents" / "skills")
+    visited, skill_paths = set(), set()
+    for root in roots:
+        for folder, dirs, files in os.walk(root, followlinks=True):
+            resolved = pathlib.Path(folder).resolve()
+            if resolved in visited:
+                dirs[:] = []
+                continue
+            visited.add(resolved)
+            if "SKILL.md" in files:
+                skill_paths.add(str(resolved / "SKILL.md"))
+    print("-c")
+    print("skills.config=[" + ",".join(
+        "{path=" + json.dumps(p, ensure_ascii=False) + ",enabled=false}"
+        for p in sorted(skill_paths)) + "]")
+    # Generated beside the job so upgrades only need to copy anchor.sh.
+    instructions = path.parent / ".request-instructions.md"
+    instructions.write_text("Reply exactly ok.\n", encoding="utf-8")
+    print("-c")
+    print("model_instructions_file=" + json.dumps(str(instructions), ensure_ascii=False))
+
+except (OSError, ValueError, AttributeError, subprocess.SubprocessError) as exc:
     print(str(exc), file=sys.stderr)
     sys.exit(1)
 PYEXEC
@@ -140,8 +195,8 @@ while IFS= read -r arg; do
   [ -n "$arg" ] && EXEC_ARGS+=("$arg")
 done <<<"$EXEC_ARGS_TEXT"
 
-
 OUT="$(mktemp -t codex-anchor)"
+FINAL="$(mktemp -t codex-anchor-reply)"
 START_EPOCH=$(date +%s)
 
 # A pmset wake lands the Mac in DarkWake, where it honours "Sleep Service Back
@@ -164,8 +219,22 @@ fi
   -s read-only \
   -c approval_policy="never" \
   -c notify="[]" \
+  -c project_doc_max_bytes=0 \
+  -c features.apps=false \
+  -c features.plugins=false \
+  -c features.memories=false \
+  -c features.shell_tool=false \
+  -c 'developer_instructions=""' \
+  -c features.multi_agent=false \
+  -c features.skill_search=false \
+  -c features.code_mode_host=false \
+  -c features.sleep_tool=false \
+  -c features.view_image=false \
+  -c features.image_generation=false \
+  -c 'web_search="disabled"' \
+  --output-last-message "$FINAL" \
   ${EXEC_ARGS[@]+"${EXEC_ARGS[@]}"} \
-  "$PROMPT" >"$OUT" 2>&1 &
+  "$PROMPT" </dev/null >"$OUT" 2>&1 &
 CODEX_PID=$!
 
 ( sleep "$TIMEOUT_SECS"
@@ -180,26 +249,22 @@ wait "$WATCHER_PID" 2>/dev/null || true
 
 ELAPSED=$(( $(date +%s) - START_EPOCH ))
 
-if [ "$RC" -eq 0 ] && [ -s "$OUT" ]; then
-  # One line of evidence that the model actually answered, not just that the
-  # process exited cleanly.
-  # tail -c cuts bytes, which splits multi-byte characters; iconv -c drops the
-  # resulting partial character instead of logging mojibake.
-  REPLY="$(tr '\n' ' ' <"$OUT" | tail -c 160 | iconv -f UTF-8 -t UTF-8 -c)"
+REPLY="$(cat "$FINAL")"
+if [ "$RC" -eq 0 ] && [ "$REPLY" = "$EXPECTED_REPLY" ]; then
+  # Only the final model acknowledgement counts, never CLI diagnostics.
   # The watchdog counts awake seconds (correct for detecting a hung request),
   # but ELAPSED is wall-clock, so the two diverge when the Mac slept mid-run.
   SLEPT=""
   [ "$ELAPSED" -gt 120 ] && SLEPT=" [machine slept mid-run; anchor landed late]"
-  log "OK    exit=0 ${ELAPSED}s tz=$(date +%Z%z)${SLEPT}  tail: ${REPLY}"
+  log "OK    exit=0 ${ELAPSED}s tz=$(date +%Z%z)${SLEPT}  reply: ${REPLY}"
 elif [ "$RC" -eq 0 ]; then
-  # Exit 0 with no output means no turn happened -- e.g. auth silently lapsed.
-  # That would not anchor a window, so do not report it as success.
-  log "WARN  exit=0 but produced no output ${ELAPSED}s -- window probably NOT anchored"
+  log "WARN  exit=0 but missing or unexpected final acknowledgement ${ELAPSED}s"
+  sed 's/^/          | /' "$OUT" | tail -n 20 >>"$LOG"
   RC=1
 else
   log "FAIL  exit=$RC ${ELAPSED}s"
   sed 's/^/          | /' "$OUT" | tail -n 20 >>"$LOG"
 fi
 
-rm -f "$OUT"
+rm -f "$OUT" "$FINAL"
 exit "$RC"

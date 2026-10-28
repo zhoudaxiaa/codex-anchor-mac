@@ -20,10 +20,21 @@ has()  { case "$2" in *"$3"*) ok "$1";; *) no "$1" "[$2] does not contain [$3]";
 setup_sandbox() {
   rm -rf "$TMP/box"; mkdir -p "$TMP/box"
   cp "$PLUGIN_DIR/anchor.sh" "$TMP/box/"
-  echo "# README for the stub to read" > "$TMP/box/README.md"
   inert_tools
 }
-stub() { printf '#!/bin/bash\n%s\n' "$1" > "$TMP/box/stub"; chmod +x "$TMP/box/stub"; }
+stub() {
+  cat > "$TMP/box/stub" <<'STUB'
+#!/bin/bash
+if [ "${1:-}" = "mcp" ]; then echo '[]'; exit 0; fi
+STUB_FINAL=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--output-last-message" ]; then STUB_FINAL="$2"; shift 2
+  else shift; fi
+done
+STUB
+  printf '%s\n' "$1" >> "$TMP/box/stub"
+  chmod +x "$TMP/box/stub"
+}
 # Never let the suite reach the real pmset or caffeinate. anchor.sh forces a
 # wake and blanks the display, which is right at 04:30 and intolerable when
 # someone is at the keyboard -- and the in-script guard reads UserIsActive,
@@ -74,7 +85,7 @@ EOF
 is "leaves the display alone while someone is using the Mac" "$(screen_probe 1)" "0"
 is "still forces a wake when nobody is active" "$(screen_probe 0)" "1"
 
-setup_sandbox; stub 'echo "stub replied"; exit 0'
+setup_sandbox; stub 'printf ok > "$STUB_FINAL"; echo "stub replied"; exit 0'
 is "exits 0 on success" "$(run_anchor)" "0"
 has "logs OK" "$(last_log)" "OK"
 
@@ -140,6 +151,7 @@ run_unittests() {
 
 run_unittests "$PLUGIN_DIR/server/test_anchor_core.py" "core"
 run_unittests "$PLUGIN_DIR/server/test_anchor_mcp.py" "mcp"
+run_unittests "$PLUGIN_DIR/server/test_execution_script.py" "execution"
 run_unittests "$PLUGIN_DIR/scripts/test_register_mcp.py" "register"
 
 # --- guards ---------------------------------------------------------------
