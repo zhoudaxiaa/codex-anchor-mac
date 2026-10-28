@@ -106,6 +106,58 @@ class HomeHealth(unittest.TestCase):
         self.assertIn("home", core.status())
 
 
+class ExecutionSettings(unittest.TestCase):
+    def test_uses_configured_catalogue_and_filters_hidden_models(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            catalog = root / "custom.json"
+            catalog.write_text(json.dumps({"models": [
+                {"slug": "test-model", "display_name": "Test", "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}]},
+                {"slug": "hidden", "visibility": "hide"},
+                {"slug": "test-model"},
+            ]}))
+            (root / "config.toml").write_text(
+                f'model = "test-model"\nmodel_catalog_json = {json.dumps(str(catalog))}\n'
+                'model_reasoning_effort = "high"\n[other]\nmodel = "ignored"\n')
+            settings = core.cli_model_settings(root)
+            self.assertEqual(settings["defaultModel"], "test-model")
+            self.assertEqual(settings["defaultReasoningEffort"], "high")
+            self.assertEqual(settings["models"], [{"id": "test-model", "label": "Test", "efforts": ["low", "high"]}])
+
+    def test_falls_back_to_model_cache_when_custom_catalogue_is_corrupt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            (root / "broken.json").write_text("{")
+            (root / "config.toml").write_text(f'model_catalog_json = {json.dumps(str(root / "broken.json"))}\n')
+            (root / "models_cache.json").write_text(json.dumps({"models": [{"slug": "cached"}]}))
+            self.assertEqual(core.cli_model_settings(root)["models"][0]["id"], "cached")
+
+    def test_missing_catalogue_does_not_break_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(core.cli_model_settings(pathlib.Path(folder))["models"], [])
+
+    def test_save_preserves_schedule_and_never_updates_wake(self):
+        cfg = {"hour": 6, "minute": 3, "timezone": "Asia/Shanghai"}
+        with mock.patch.object(core, "load_config", return_value=cfg), \
+                mock.patch.object(core, "cli_model_settings", return_value={"defaultModel": "", "models": []}), \
+                mock.patch.object(core, "save_config") as save, \
+                mock.patch.object(core, "status", return_value={}), \
+                mock.patch.object(core, "run") as run:
+            core.set_execution("test/model", "high")
+        save.assert_called_once_with({**cfg, "model": "test/model", "reasoning_effort": "high"})
+        self.assertEqual(cfg["hour"], 6)
+        run.assert_not_called()
+
+    def test_unsupported_effort_is_rejected_without_saving(self):
+        settings = {"defaultModel": "test", "models": [{"id": "test", "efforts": ["low"]}]}
+        with mock.patch.object(core, "cli_model_settings", return_value=settings), \
+                mock.patch.object(core, "save_config") as save:
+            for model, effort in [("test", "ultra"), ("", "high"), (" -x", "low"), ("test\nother", "low"), ("test", "unknown")]:
+                with self.assertRaises(ValueError):
+                    core.set_execution(model, effort)
+            save.assert_not_called()
+
+
 class WakeAuthorization(unittest.TestCase):
     def test_sudo_success_needs_no_dialog(self):
         with mock.patch.object(core, "run", return_value=(0, "")) as run:

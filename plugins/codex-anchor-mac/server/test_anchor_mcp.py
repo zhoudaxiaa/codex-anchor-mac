@@ -4,12 +4,14 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 SERVER = pathlib.Path(__file__).resolve().parent / "anchor_mcp.py"
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}
 
 # The suite runs on the same Mac the tool schedules, and pmset is global.
 os.environ.setdefault("ANCHOR_DRY_RUN", "1")
+import anchor_mcp as server
 
 
 def talk(requests: list) -> list:
@@ -28,12 +30,18 @@ class Protocol(unittest.TestCase):
         self.assertIn("tools", caps)
         self.assertIn("resources", caps)
 
-    def test_tools_list_has_the_six_tools(self):
+    def test_tools_list_has_the_seven_tools(self):
         out = talk([INIT, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}])
         names = {t["name"] for t in out[1]["result"]["tools"]}
         self.assertEqual(names, {"anchor_status", "anchor_set_time",
                                  "anchor_toggle", "anchor_run_now",
-                                 "anchor_install", "anchor_uninstall"})
+                                 "anchor_install", "anchor_uninstall", "anchor_set_execution"})
+
+    def test_execution_tool_rejects_invalid_settings(self):
+        out = talk([INIT, {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                          "params": {"name": "anchor_set_execution", "arguments": {
+                              "model": "--invalid", "reasoning_effort": "low"}}}])
+        self.assertIn("error", json.loads(out[1]["result"]["content"][0]["text"]))
 
     def test_status_tool_carries_the_ui_resource(self):
         out = talk([INIT, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}])
@@ -71,6 +79,34 @@ class Protocol(unittest.TestCase):
         body = json.loads(out[1]["result"]["content"][0]["text"])
         self.assertIn("timezone", body)
         self.assertIn("runs", body)
+
+
+class RunNow(unittest.TestCase):
+    def test_start_returns_status_without_killing_existing_processes(self):
+        with mock.patch.object(server.core, "agent_state", return_value={"running": False}), \
+                mock.patch.object(server.core, "run", return_value=(0, "")) as run, \
+                mock.patch.object(server.core, "status", return_value={"running": True}):
+            body = json.loads(server.call_tool("anchor_run_now", {})["content"][0]["text"])
+        run.assert_called_once_with(["launchctl", "kickstart", server.core.SERVICE])
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["status"]["running"])
+
+    def test_running_request_is_not_restarted(self):
+        with mock.patch.object(server.core, "agent_state", return_value={"running": True}), \
+                mock.patch.object(server.core, "run") as run, \
+                mock.patch.object(server.core, "status", return_value={"running": True}):
+            body = json.loads(server.call_tool("anchor_run_now", {})["content"][0]["text"])
+        run.assert_not_called()
+        self.assertFalse(body["ok"])
+        self.assertIn("already running", body["detail"])
+
+    def test_launch_failure_is_returned_to_the_panel(self):
+        with mock.patch.object(server.core, "agent_state", return_value={"running": False}), \
+                mock.patch.object(server.core, "run", return_value=(1, "Could not find service")), \
+                mock.patch.object(server.core, "status", return_value={"running": False}):
+            body = json.loads(server.call_tool("anchor_run_now", {})["content"][0]["text"])
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["detail"], "Could not find service")
 
 
 class FirstRun(unittest.TestCase):

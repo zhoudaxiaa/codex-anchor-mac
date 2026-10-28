@@ -38,6 +38,13 @@
     font: 600 20px var(--mono); padding: 7px 10px; border-radius: 7px;
     border: 1px solid var(--line); background: var(--bg); color: var(--fg);
   }
+  .field { display: flex; flex-direction: column; gap: 5px; flex: 1 1 210px; min-width: 0; }
+  .field span { color: var(--muted); font-size: 12px; }
+  .field select {
+    width: 100%; min-width: 0; font: 14px var(--mono); padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--fg);
+  }
   button {
     font: 500 14px inherit; padding: 8px 15px; border-radius: 7px; cursor: pointer;
     border: 1px solid var(--line); background: var(--card); color: var(--fg);
@@ -94,12 +101,32 @@
   </div>
 
   <div class="card">
+    <h2 data-i18n="executionSettings"></h2>
+    <div class="row" style="align-items:flex-end">
+      <label class="field"><span data-i18n="model"></span><select id="modelpick"></select></label>
+      <label class="field"><span data-i18n="reasoningEffort"></span><select id="effortpick"></select></label>
+      <button class="primary" id="saveexecution" data-i18n="save"></button>
+    </div>
+    <p class="note" data-i18n="executionHint"></p>
+    <p id="executionwarning" class="note bad" role="status" aria-live="polite"></p>
+    <div id="executionsteps" aria-live="polite"></div>
+  </div>
+
+  <div class="card">
     <h2 data-i18n="controls"></h2>
     <div class="row">
       <button id="toggle">…</button>
       <button class="danger" id="runnow" data-i18n="runNow"></button>
       <span class="note" style="margin:0" data-i18n="runNowHint"></span>
     </div>
+    <div id="runconfirm" hidden>
+      <p class="note" data-i18n="confirmRun"></p>
+      <div class="row">
+        <button class="primary" id="confirmrun" data-i18n="confirmRunAction"></button>
+        <button id="cancelrun" data-i18n="cancel"></button>
+      </div>
+    </div>
+    <div id="runfeedback" class="note" role="status" aria-live="polite"></div>
   </div>
 
   <div class="card">

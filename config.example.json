@@ -2,5 +2,7 @@
   "_comment": "Copy to config.json, or just let install.sh create it. timezone null means: follow the system timezone.",
   "timezone": null,
   "hour": 4,
-  "minute": 30
+  "minute": 30,
+  "model": "",
+  "reasoning_effort": "low"
 }

@@ -1,8 +1,11 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 import { STR, type Lang } from './strings';
 
-const app = new App({ name: 'codex-anchor-mac', version: '0.1.1' });
+const app = new App({ name: 'codex-anchor-mac', version: '0.1.6' });
 let st: any = null;
+let executionDirty = false;
+let executionSaving = false;
+let runBusy = false;
 let lang: Lang = 'en';
 try { lang = (localStorage.getItem('lang') as Lang) || 'en'; } catch {}
 const T = () => STR[lang] as any;
@@ -36,8 +39,55 @@ function describeState(s: any) {
   return `${base} · ${T().never}`;
 }
 
+function updateExecutionControls() {
+  (document.getElementById('modelpick') as HTMLSelectElement).disabled = executionSaving;
+  const effort = document.getElementById('effortpick') as HTMLSelectElement;
+  effort.disabled = executionSaving;
+  (document.getElementById('saveexecution') as HTMLButtonElement).disabled =
+    executionSaving || !!effort.validationMessage;
+}
+
+function renderEfforts(preferred: string) {
+  const execution = st?.execution;
+  if (!execution) return;
+  const model = (document.getElementById('modelpick') as HTMLSelectElement).value
+    || execution.defaultModel;
+  const known = execution.models.find((m: any) => m.id === model);
+  const efforts: string[] = known ? known.efforts : execution.efforts;
+  const select = document.getElementById('effortpick') as HTMLSelectElement;
+  select.replaceChildren(new Option(T().cliDefault, ''),
+    ...efforts.map(e => new Option(e, e)));
+  const unsupported = !!preferred && !efforts.includes(preferred);
+  const message = unsupported ? T().unsupportedEffort(preferred) : '';
+  if (unsupported) {
+    const option = new Option(`${preferred} (${T().unsupported})`, preferred);
+    option.disabled = true;
+    select.add(option);
+  }
+  select.value = preferred;
+  select.setCustomValidity(message);
+  document.getElementById('executionwarning')!.textContent = message;
+  updateExecutionControls();
+}
+
+function renderExecution(s: any) {
+  if (!s.execution || executionDirty) return;
+  const execution = s.execution;
+  const select = document.getElementById('modelpick') as HTMLSelectElement;
+  const defaultLabel = T().cliDefault + (execution.defaultModel ? ` (${execution.defaultModel})` : '');
+  select.replaceChildren(new Option(defaultLabel, ''),
+    ...execution.models.map((m: any) => new Option(`${m.label} (${m.id})`, m.id)));
+  // Keep a saved model visible when the local catalogue is temporarily absent.
+  if (execution.model && !execution.models.some((m: any) => m.id === execution.model)) {
+    select.add(new Option(execution.model, execution.model));
+  }
+  select.value = execution.model;
+  renderEfforts(execution.reasoningEffort);
+}
+
 function render(s: any) {
   st = s;
+  renderExecution(s);
   document.getElementById('time')!.textContent = s.time || T().notConfigured;
   document.getElementById('state')!.textContent = describeState(s);
   document.getElementById('state')!.className = 'v ' + (s.loaded ? 'ok' : 'bad');
@@ -71,6 +121,10 @@ function render(s: any) {
   warn.className = 'note bad';
   const t = document.getElementById('toggle') as HTMLButtonElement;
   t.textContent = s.loaded ? T().disable : T().enable;
+  const run = document.getElementById('runnow') as HTMLButtonElement;
+  run.disabled = runBusy || !!s.running;
+  run.textContent = s.running ? T().runActive : T().runNow;
+  if (s.running) document.getElementById('runconfirm')!.hidden = true;
   document.getElementById('log')!.textContent = s.runs.length
     ? s.runs.join('\n') : T().noRuns;
 }
@@ -96,13 +150,44 @@ function applyLang() {
   if (res.status) render(res.status);
 };
 
-function renderSteps(res: any) {
-  const box = document.getElementById('steps')!;
+function renderSteps(res: any, id = 'steps') {
+  const box = document.getElementById(id)!;
   box.innerHTML = (res.steps || []).map((s: any) =>
     `<div class="${s.ok ? 'ok' : 'bad'}">${s.ok ? '\u2713' : '\u2717'} ${esc(s.step)}` +
     `${s.detail ? ' \u2014 ' + esc(s.detail) : ''}</div>`).join('')
     || `<div class="bad">${esc(res.error || 'unknown error')}</div>`;
 }
+
+(document.getElementById('modelpick') as HTMLSelectElement).onchange = () => {
+  executionDirty = true;
+  renderEfforts((document.getElementById('effortpick') as HTMLSelectElement).value);
+};
+(document.getElementById('effortpick') as HTMLSelectElement).onchange = () => {
+  executionDirty = true;
+  renderEfforts((document.getElementById('effortpick') as HTMLSelectElement).value);
+};
+(document.getElementById('saveexecution') as HTMLButtonElement).onclick = async () => {
+  if (executionSaving || !(document.getElementById('effortpick') as HTMLSelectElement).checkValidity()) return;
+  executionSaving = true;
+  executionDirty = true;
+  updateExecutionControls();
+  try {
+    const res = await callTool('anchor_set_execution', {
+      model: (document.getElementById('modelpick') as HTMLSelectElement).value,
+      reasoning_effort: (document.getElementById('effortpick') as HTMLSelectElement).value,
+    });
+    renderSteps(res, 'executionsteps');
+    if (res.status) {
+      executionDirty = false;
+      render(res.status);
+    }
+  } catch (error) {
+    renderSteps({ error: String(error) }, 'executionsteps');
+  } finally {
+    executionSaving = false;
+    updateExecutionControls();
+  }
+};
 
 (document.getElementById('save') as HTMLButtonElement).onclick = async (e) => {
   const target = e.target as HTMLButtonElement;
@@ -127,12 +212,36 @@ function renderSteps(res: any) {
   if (res.status) render(res.status);
 };
 
-(document.getElementById('runnow') as HTMLButtonElement).onclick = async (e) => {
-  if (!confirm(T().confirmRun as string)) return;
-  const target = e.target as HTMLButtonElement;
-  target.disabled = true;
-  await callTool('anchor_run_now');
-  setTimeout(() => { target.disabled = false; void refresh(); }, 4000);
+(document.getElementById('runnow') as HTMLButtonElement).onclick = () => {
+  // Native confirm() is suppressed in embedded frames without allow-modals.
+  document.getElementById('runconfirm')!.hidden = false;
+  document.getElementById('confirmrun')!.focus();
+};
+(document.getElementById('cancelrun') as HTMLButtonElement).onclick = () => {
+  document.getElementById('runconfirm')!.hidden = true;
+  document.getElementById('runnow')!.focus();
+};
+(document.getElementById('confirmrun') as HTMLButtonElement).onclick = async () => {
+  if (runBusy || st?.running) return;
+  runBusy = true;
+  document.getElementById('runconfirm')!.hidden = true;
+  const feedback = document.getElementById('runfeedback')!;
+  feedback.className = 'note';
+  feedback.textContent = T().runStarting;
+  if (st) render(st);
+  try {
+    const res = await callTool('anchor_run_now');
+    feedback.className = 'note ' + (res.ok ? 'ok' : 'bad');
+    feedback.textContent = res.ok ? T().runQueued : (res.error || res.detail || T().runFailed);
+    if (res.status) render(res.status);
+    else await refresh();
+  } catch (error) {
+    feedback.className = 'note bad';
+    feedback.textContent = `${T().runFailed} ${String(error)}`;
+  } finally {
+    runBusy = false;
+    if (st) render(st);
+  }
 };
 
 (document.getElementById('lang') as HTMLButtonElement).onclick = () => {

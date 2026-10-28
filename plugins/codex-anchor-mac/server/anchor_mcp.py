@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import anchor_core as core
 
-VERSION = "0.1.1"
+VERSION = "0.1.6"
 PROTOCOLS = ["2026-01-26", "2025-06-18"]
 PANEL = pathlib.Path(__file__).resolve().parent.parent / "ui" / "dist" / "panel.html"
 PANEL_URI = f"ui://codex-anchor-mac/panel-{VERSION}.html"
@@ -46,6 +46,14 @@ TOOLS = [
                                     "minute": {"type": "integer"},
                                     "timezone": {"type": "string"}},
                      "required": ["hour", "minute"]},
+     "_meta": _UI},
+    {"name": "anchor_set_execution",
+     "description": "Save the model and reasoning effort for scheduled requests. "
+                    "An empty value follows the Codex CLI configuration. Does not run a request or change the wake schedule.",
+     "inputSchema": {"type": "object", "properties": {
+         "model": {"type": "string"},
+         "reasoning_effort": {"type": "string", "enum": ["", *core.REASONING_EFFORTS]}},
+         "required": ["model", "reasoning_effort"]},
      "_meta": _UI},
     {"name": "anchor_toggle",
      "description": "Enable or disable the daily anchor job.",
@@ -99,6 +107,11 @@ def call_tool(name: str, args: dict) -> dict:
         tz = args.get("timezone") or core.load_config()["timezone"]
         return _text({"steps": core.set_schedule(hour, minute, tz),
                       "status": core.status()})
+    if name == "anchor_set_execution":
+        try:
+            return _text(core.set_execution(args.get("model"), args.get("reasoning_effort")))
+        except ValueError as exc:
+            return _text({"error": str(exc)})
     if name == "anchor_toggle":
         if args.get("enable"):
             core.run(["launchctl", "enable", core.SERVICE])
@@ -109,8 +122,12 @@ def call_tool(name: str, args: dict) -> dict:
             rc, out = core.run(["launchctl", "bootout", core.SERVICE])
         return _text({"ok": rc == 0, "detail": out, "status": core.status()})
     if name == "anchor_run_now":
-        rc, out = core.run(["launchctl", "kickstart", "-k", core.SERVICE])
-        return _text({"ok": rc == 0, "detail": out})
+        if core.agent_state()["running"]:
+            return _text({"ok": False, "detail": "An anchor request is already running.",
+                          "status": core.status()})
+        # Do not kill an in-flight request when a user clicks more than once.
+        rc, out = core.run(["launchctl", "kickstart", core.SERVICE])
+        return _text({"ok": rc == 0, "detail": out, "status": core.status()})
     if name == "anchor_install":
         # Also the refresh path: it re-copies anchor.sh and rewrites .version,
         # which is exactly what version drift needs.

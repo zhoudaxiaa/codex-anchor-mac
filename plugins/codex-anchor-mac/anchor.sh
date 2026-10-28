@@ -107,6 +107,40 @@ done < <(self_check 2>/dev/null)
 
 PROMPT='Read README.md in the current directory and print only its first 100 characters. Do nothing else.'
 
+# Read persisted options as separate arguments; never evaluate config as shell.
+# Missing settings preserve the original default-model + low behavior.
+if ! EXEC_ARGS_TEXT="$(/usr/bin/python3 - "$DIR/config.json" "$CODEX" <<'PYEXEC'
+import json, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+try:
+    cfg = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    model = cfg.get("model", "")
+    effort = cfg.get("reasoning_effort", "low")
+    if not isinstance(model, str) or len(model) > 200 or model.strip().startswith("-") or any(
+            ord(c) < 32 or ord(c) == 127 for c in model):
+        raise ValueError("invalid model ID")
+    if effort not in ("", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"):
+        raise ValueError("invalid reasoning effort")
+    if model.strip():
+        print("--model")
+        print(model.strip())
+    if effort:
+        print("-c")
+        print("model_reasoning_effort=" + json.dumps(effort))
+except (OSError, ValueError, AttributeError) as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+PYEXEC
+)"; then
+  log "FAIL  invalid execution settings in config.json"
+  exit 1
+fi
+EXEC_ARGS=()
+while IFS= read -r arg; do
+  [ -n "$arg" ] && EXEC_ARGS+=("$arg")
+done <<<"$EXEC_ARGS_TEXT"
+
+
 OUT="$(mktemp -t codex-anchor)"
 START_EPOCH=$(date +%s)
 
@@ -129,8 +163,8 @@ fi
   -C "$DIR" \
   -s read-only \
   -c approval_policy="never" \
-  -c model_reasoning_effort="low" \
   -c notify="[]" \
+  ${EXEC_ARGS[@]+"${EXEC_ARGS[@]}"} \
   "$PROMPT" >"$OUT" 2>&1 &
 CODEX_PID=$!
 

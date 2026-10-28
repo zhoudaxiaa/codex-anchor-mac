@@ -31,8 +31,9 @@ SERVICE = f"gui/{UID}/{LABEL}"
 # pmset must wake the Mac slightly before launchd fires, or a battery night
 # misses the trigger entirely.
 WAKE_LEAD_MINUTES = 3
-PLUGIN_VERSION = "0.1.1"
+PLUGIN_VERSION = "0.1.6"
 VERSION_FILE = HOME_DIR / ".version"
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 
 
 # Set by the tests so they cannot reach launchctl, pmset or osascript. The
@@ -112,6 +113,8 @@ def load_config() -> dict:
         cfg["timezone"] = system_timezone()
     cfg.setdefault("hour", 4)
     cfg.setdefault("minute", 30)
+    cfg.setdefault("model", "")
+    cfg.setdefault("reasoning_effort", "low")
     cfg.setdefault("computedUnderSystemTimezone", cfg["timezone"])
     if not CONFIG.exists():
         save_config(cfg)
@@ -122,6 +125,77 @@ def save_config(cfg: dict) -> None:
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     CONFIG.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n",
                       encoding="utf-8")
+
+
+def cli_model_settings(root: pathlib.Path | None = None) -> dict:
+    """Read only the CLI's model settings and its local model catalogue.
+
+    macOS's bundled Python may lack tomllib. These top-level string settings
+    use a small fallback reader there; never return unrelated config values.
+    """
+    root = root if root is not None else pathlib.Path(
+        os.environ.get("CODEX_HOME", str(pathlib.Path.home() / ".codex")))
+    settings = {}
+    try:
+        text = (root / "config.toml").read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if line.lstrip().startswith("["):
+                break
+            match = re.match(
+                r'''^\s*(model|model_reasoning_effort|model_catalog_json)\s*=\s*("(?:\\.|[^"\\])*"|'[^']*')''', line)
+            if match:
+                value = match[2]
+                settings[match[1]] = json.loads(value) if value.startswith('"') else value[1:-1]
+    except (OSError, ValueError):
+        pass
+
+    catalog = settings.get("model_catalog_json")
+    paths = ([pathlib.Path(catalog).expanduser()] if catalog else []) + [root / "models_cache.json"]
+    models = []
+    for path in paths:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            rows = data.get("models", [])
+            if not isinstance(rows, list):
+                continue
+            seen = set()
+            for row in rows:
+                if not isinstance(row, dict) or row.get("visibility", "list") != "list":
+                    continue
+                slug = row.get("slug")
+                if not isinstance(slug, str) or not slug or slug in seen:
+                    continue
+                seen.add(slug)
+                levels = row.get("supported_reasoning_levels", [])
+                efforts = [e["effort"] for e in levels
+                           if isinstance(e, dict) and e.get("effort") in REASONING_EFFORTS] if isinstance(levels, list) else []
+                models.append({"id": slug, "label": row.get("display_name") or slug,
+                               "efforts": efforts})
+            if models:
+                break
+        except (OSError, ValueError, AttributeError):
+            continue
+    return {"defaultModel": settings.get("model", ""),
+            "defaultReasoningEffort": settings.get("model_reasoning_effort", ""),
+            "models": models}
+
+
+def set_execution(model: str, reasoning_effort: str) -> dict:
+    if not isinstance(model, str) or len(model) > 200 or model.strip().startswith("-") or any(
+            ord(c) < 32 or ord(c) == 127 for c in model):
+        raise ValueError("model must be a model ID or an empty string for the CLI default")
+    if not isinstance(reasoning_effort, str) or reasoning_effort not in ("", *REASONING_EFFORTS):
+        raise ValueError("unsupported reasoning effort")
+    model = model.strip()
+    settings = cli_model_settings()
+    selected = model or settings["defaultModel"]
+    known = next((m for m in settings["models"] if m["id"] == selected), None)
+    if known is not None and reasoning_effort and reasoning_effort not in known["efforts"]:
+        raise ValueError(f"{selected} does not support reasoning effort {reasoning_effort}")
+    cfg = load_config()
+    cfg.update({"model": model, "reasoning_effort": reasoning_effort})
+    save_config(cfg)
+    return {"steps": [{"step": "save execution settings", "ok": True}], "status": status()}
 
 
 def to_local(hour: int, minute: int, tz_name: str) -> tuple[int, int]:
@@ -304,6 +378,9 @@ def status() -> dict:
         "runs": recent_runs(),
         "home": home_health(),
         "timezones": timezone_choices(),
+        "execution": {**cli_model_settings(), "model": cfg["model"],
+                      "reasoningEffort": cfg["reasoning_effort"],
+                      "efforts": list(REASONING_EFFORTS)},
     }
 
 
