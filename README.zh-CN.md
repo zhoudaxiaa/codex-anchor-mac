@@ -10,7 +10,7 @@ macOS 系统授权框，最多等待 120 秒；取消授权时保留部分失败
 设置保存在 `~/.codex-anchor/config.json` 的 `model` 和 `reasoning_effort`
 字段，空字符串表示不覆盖。
 
-本地构建安装：
+本地构建安装（先确认终端能运行 `codex --version`，见下方「准备 CLI 命令」）：
 
 ```bash
 cd plugins/codex-anchor-mac/ui
@@ -104,7 +104,32 @@ anchor 时刻 = 起床时间 + 一个窗口能撑多久 − 5h
 
 ## 安装
 
-在 Codex 里：
+### 1. 准备 CLI 命令
+
+以下安装和注册命令在 **macOS「终端」**中执行。安装桌面应用后，`codex` 不一定
+已经加入终端的 `PATH`；如果提示 `command not found: codex`，需要先找到应用内置
+的可执行文件。假设路径为：
+
+```text
+/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex
+```
+
+执行以下命令，并确认能输出版本号：
+
+```bash
+export PATH="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin:$PATH"
+codex --version
+```
+
+路径会随应用版本和安装位置变化，请替换成实际的可执行文件目录。
+
+**这条 `export` 只对当前终端会话生效。** 如果希望之后打开终端也能使用，
+将同一条 `export PATH=...` 添加到 `~/.zshrc`，再执行 `source ~/.zshrc`。
+这是当前用户的 shell 配置，不是所有桌面应用共用的系统级全局环境变量。
+
+### 2. 安装插件并注册 MCP
+
+确认 `codex --version` 能输出版本号后，在同一个终端执行：
 
 ```bash
 codex plugin marketplace add https://github.com/unnamedhoead/codex-anchor-mac.git
@@ -112,9 +137,23 @@ codex plugin add codex-anchor-mac@codex-anchor-mac
 python3 ~/.codex/plugins/cache/codex-anchor-mac/codex-anchor-mac/*/scripts/register_mcp.py
 ```
 
-然后开一个**新的** Codex 会话，让它打开锚点面板。
+如果已经通过桌面端安装了插件，仍需执行上面的 `python3 .../register_mcp.py`
+注册命令，才能让新对话加载 MCP 工具。
 
-第三行不是可选项，也不是你装错了：Codex 会安装插件并标记为 enabled，但**不会**读
+### 3. 新建对话，@ 插件打开面板
+
+注册完成后，在 Codex 桌面端**新建一个对话**。在输入框输入 `@`，从插件列表中
+选择 **Codex Anchor**，然后发送：
+
+```text
+@Codex Anchor 打开面板
+```
+
+需要选中实际的插件提及项，只输入插件名称的普通文本不等同于选择插件。
+注册前已经打开的旧对话可能没有加载 MCP 工具。插件升级后，重新执行注册命令并
+新建对话；如果面板仍显示旧版本，再重启桌面应用。
+
+`register_mcp.py` 注册步骤不能省略：Codex 会安装插件并标记为 enabled，但**不会**读
 `mcp.json` 去启动 server——少了这一步，插件装上了而工具永远不出现。插件升级后要重跑一次，
 因为缓存路径里带版本号，旧注册会指向一个已经不存在的目录。
 

@@ -83,6 +83,32 @@ up at 4am.
 
 ## Install
 
+### Make the Codex CLI available in Terminal
+
+Run the installation and registration commands below in **macOS Terminal**.
+Installing the desktop app does not necessarily add `codex` to your shell's
+`PATH`. If you see `command not found: codex`, locate the bundled executable.
+For example, if it is at:
+
+```text
+/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex
+```
+
+add its directory to `PATH` and verify that the command works:
+
+```bash
+export PATH="/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin:$PATH"
+codex --version
+```
+
+Continue once a version number appears. The path depends on your app version
+and installation location; replace the example with your actual directory.
+
+`export` affects the current terminal session. To keep it for future zsh
+sessions, add the same `export PATH=...` line to `~/.zshrc`, then run
+`source ~/.zshrc`. This configures your shell; it does not set a system-wide
+environment variable for every desktop app.
+
 ### This fork (0.1.6)
 
 This fork fixes administrator authorization when changing the wake time. If
@@ -127,7 +153,7 @@ use the plugin's install/repair action instead.
 
 ### Upstream installation
 
-Inside Codex:
+In macOS Terminal, after verifying `codex --version`:
 
 ```bash
 codex plugin marketplace add https://github.com/unnamedhoead/codex-anchor-mac.git
@@ -135,9 +161,21 @@ codex plugin add codex-anchor-mac@codex-anchor-mac
 python3 ~/.codex/plugins/cache/codex-anchor-mac/codex-anchor-mac/*/scripts/register_mcp.py
 ```
 
-Then open a **new** Codex session and ask it to open the anchor panel.
+### Open the panel in a new chat
 
-The third line is not optional and not a bug in your setup: Codex installs
+After registration, open a **new chat** in the Codex desktop app. In the message
+box, type `@`, select **Codex Anchor** from the plugin picker, and send:
+
+```text
+@Codex Anchor Open the anchor panel.
+```
+
+Select the actual plugin mention rather than typing only its name. A chat
+that was already open before registration may not have the MCP tools. After
+upgrading, run the registration command again and start another new chat;
+restart the desktop app if it still shows the old panel.
+
+The `register_mcp.py` command is not optional and not a bug in your setup: Codex installs
 the plugin and marks it enabled, but it does not read `mcp.json` and start
 the server, so without it the plugin is installed and its tools never appear.
 Re-run it after upgrading the plugin — the cache path carries the version, so
