@@ -83,11 +83,26 @@ up at 4am.
 
 ## Install
 
-### This fork (0.1.1)
+### This fork (0.1.6)
 
 This fork fixes administrator authorization when changing the wake time. If
 unattended `sudo` fails, macOS asks for authorization using its system dialog
 (up to 120 seconds). Cancelling keeps a visible partial-failure message.
+
+The panel's **Request settings** card selects the model and reasoning effort
+for both scheduled and manual runs. Models and supported effort levels are
+read from the CLI's configured local model catalogue (or `models_cache.json`).
+Settings are saved separately from the schedule, without sending a request or
+asking for wake authorization. Existing installs keep the CLI's default model
+and `low` effort until changed. Choosing **Follow Codex default** omits that
+override from the command. The settings live in `~/.codex-anchor/config.json`
+as `model` and `reasoning_effort`; an empty string means no override.
+
+Anchor requests use a short dedicated instruction file and disable local skill
+catalogues, MCP, apps, plugins, memory, web search, and optional execution tools
+through invocation-only overrides. Your normal Codex configuration is unchanged.
+The CLI can still inject global AGENTS.md and some built-in tool/protocol
+instructions; this is a smaller request, not an empty context.
 
 For local development, build and install this checkout as the marketplace:
 
@@ -190,13 +205,17 @@ day.
   permissive global config
 - `--ephemeral` — no session history
 - a 240-second watchdog and a directory lock
-- a prompt that reads this README and prints its first 100 characters, which
-  doubles as a health check: if the log tail looks wrong, something is wrong
+- the prompt `回复ok`, with no file dependency
+- per-run overrides that disable apps, plugins, memories, shell tools, configured
+  MCP servers, and project-document loading, while preserving authentication,
+  provider settings, and the selected model/effort
+- a separate final-message file: only an exact `ok` reply plus exit 0 logs success;
+  diagnostic output alone is insufficient
 
 It logs to `anchor.log`:
 
 ```
-2026-10-07 05:02:18 +0800  OK  exit=0 22s tz=CST+0800  tail: # codex-anchor-mac ...
+2026-10-07 05:02:18 +0800  OK  exit=0 22s tz=CST+0800  reply: ok
 ```
 
 **It must authenticate as a ChatGPT subscription** (`auth_mode = chatgpt` in
@@ -209,7 +228,7 @@ start a subscription window at all.
 ./test.sh
 ```
 
-48 checks, all against a stub binary in a throwaway directory, so no real
+The checks use stub binaries and temporary fixtures, so no real
 request is ever sent and no quota window is opened. They cover `anchor.sh`'s
 success, empty-output, failure, watchdog, missing-binary and locking paths, the
 timezone conversion, the MCP protocol surface over stdio, and the guards (TCC
