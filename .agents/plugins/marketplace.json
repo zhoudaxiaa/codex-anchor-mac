@@ -8,10 +8,8 @@
       "name": "codex-anchor-mac",
       "category": "Developer Tools",
       "source": {
-        "source": "git-subdir",
-        "url": "https://github.com/unnamedhoead/codex-anchor-mac.git",
-        "path": "plugins/codex-anchor-mac",
-        "ref": "main"
+        "source": "local",
+        "path": "./plugins/codex-anchor-mac"
       },
       "policy": {
         "installation": "AVAILABLE"

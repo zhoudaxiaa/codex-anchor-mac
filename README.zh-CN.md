@@ -1,5 +1,27 @@
 # codex-anchor-mac
 
+本 fork 的 `0.1.1` 修复了修改时间时的管理员授权：免密执行失败后，弹出
+macOS 系统授权框，最多等待 120 秒；取消授权时保留部分失败提示。
+
+本地构建安装：
+
+```bash
+cd plugins/codex-anchor-mac/ui
+npm ci
+npm run build
+cd ../../..
+# 若已配置同名上游 marketplace，先移除旧来源：
+# codex plugin marketplace remove codex-anchor-mac
+codex plugin marketplace add "$PWD"
+codex plugin add codex-anchor-mac@codex-anchor-mac
+python3 plugins/codex-anchor-mac/scripts/register_mcp.py
+```
+
+marketplace 使用相对本地路径，安装本 fork 的文件，不再从上游抓取插件。
+安装后重启桌面应用以重新加载 MCP 后端。每日任务仍从 `~/.codex-anchor/`
+执行；源码可保留在 Documents 中。该目录下不要运行独立的 `setup.sh`，
+应使用插件面板的安装／修复操作。
+
 [![English](https://img.shields.io/badge/English-lightgrey?style=for-the-badge)](README.md)
 [![简体中文](https://img.shields.io/badge/简体中文-blue?style=for-the-badge)](README.zh-CN.md)
 

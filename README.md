@@ -83,6 +83,35 @@ up at 4am.
 
 ## Install
 
+### This fork (0.1.1)
+
+This fork fixes administrator authorization when changing the wake time. If
+unattended `sudo` fails, macOS asks for authorization using its system dialog
+(up to 120 seconds). Cancelling keeps a visible partial-failure message.
+
+For local development, build and install this checkout as the marketplace:
+
+```bash
+cd plugins/codex-anchor-mac/ui
+npm ci
+npm run build
+cd ../../..
+codex plugin marketplace add "$PWD"
+codex plugin add codex-anchor-mac@codex-anchor-mac
+python3 plugins/codex-anchor-mac/scripts/register_mcp.py
+```
+
+The marketplace uses a local relative plugin path, so it installs this fork's
+files instead of fetching the upstream repository. If an upstream marketplace
+with the same name is already configured, remove that marketplace entry first
+with `codex plugin marketplace remove codex-anchor-mac`, then add this checkout.
+Restart the desktop app after installation so the MCP process loads the new
+code. The daily job remains in `~/.codex-anchor/`, outside the source checkout.
+Do not use the standalone `setup.sh` from a TCC-protected Documents directory;
+use the plugin's install/repair action instead.
+
+### Upstream installation
+
 Inside Codex:
 
 ```bash

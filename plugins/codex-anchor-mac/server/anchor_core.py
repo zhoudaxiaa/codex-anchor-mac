@@ -31,7 +31,7 @@ SERVICE = f"gui/{UID}/{LABEL}"
 # pmset must wake the Mac slightly before launchd fires, or a battery night
 # misses the trigger entirely.
 WAKE_LEAD_MINUTES = 3
-PLUGIN_VERSION = "0.1.0"
+PLUGIN_VERSION = "0.1.1"
 VERSION_FILE = HOME_DIR / ".version"
 
 

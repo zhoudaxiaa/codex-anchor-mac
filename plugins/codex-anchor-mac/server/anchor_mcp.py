@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import anchor_core as core
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 PROTOCOLS = ["2026-01-26", "2025-06-18"]
 PANEL = pathlib.Path(__file__).resolve().parent.parent / "ui" / "dist" / "panel.html"
 PANEL_URI = f"ui://codex-anchor-mac/panel-{VERSION}.html"

@@ -211,7 +211,7 @@ if /usr/bin/python3 -c "
 import json,pathlib
 d=json.load(open('$MKT'))
 p=d['plugins'][0]
-assert p['source']['path']=='plugins/codex-anchor-mac', p['source']['path']
+assert pathlib.Path(p['source']['path']) == pathlib.Path('plugins/codex-anchor-mac'), p['source']['path']
 assert pathlib.Path('$DIR', p['source']['path']).is_dir()
 " 2>/dev/null
 then ok "marketplace manifest points at a real plugin directory"

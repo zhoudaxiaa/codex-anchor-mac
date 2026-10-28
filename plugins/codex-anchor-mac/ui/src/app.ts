@@ -1,7 +1,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 import { STR, type Lang } from './strings';
 
-const app = new App({ name: 'codex-anchor-mac', version: '0.1.0' });
+const app = new App({ name: 'codex-anchor-mac', version: '0.1.1' });
 let st: any = null;
 let lang: Lang = 'en';
 try { lang = (localStorage.getItem('lang') as Lang) || 'en'; } catch {}
