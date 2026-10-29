@@ -109,7 +109,16 @@ sessions, add the same `export PATH=...` line to `~/.zshrc`, then run
 `source ~/.zshrc`. This configures your shell; it does not set a system-wide
 environment variable for every desktop app.
 
-### This fork (0.1.6)
+### This fork (0.1.7)
+
+A preparation LaunchAgent starts at the wake time (three minutes before the
+request), holds an awake assertion while waiting, and releases it when the
+request exits. The request's calendar time and Run now behavior are unchanged.
+Preparation has a bounded timeout if the request never starts or hangs. Its
+logs are `~/.codex-anchor/prepare.out.log` and `prepare.err.log`; request starts
+and results are recorded in `anchor.log`. Both jobs are updated, enabled,
+disabled, and removed together. Battery/DarkWake behavior still needs testing
+on the target Mac; macOS can override assertions for forced sleep or low battery.
 
 This fork fixes administrator authorization when changing the wake time. If
 unattended `sudo` fails, macOS asks for authorization using its system dialog

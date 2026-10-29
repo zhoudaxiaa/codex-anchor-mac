@@ -5,7 +5,7 @@ set -uo pipefail
 
 JOB="io.github.codex-anchor-mac"
 
-for label in "$JOB"; do
+for label in "$JOB.prepare" "$JOB"; do
   if launchctl print "gui/$UID/$label" >/dev/null 2>&1; then
     launchctl bootout "gui/$UID/$label" 2>/dev/null && echo "unloaded $label"
   fi

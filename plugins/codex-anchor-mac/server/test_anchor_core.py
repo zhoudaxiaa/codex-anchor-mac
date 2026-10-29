@@ -224,8 +224,13 @@ class Install(unittest.TestCase):
                 return 1, "User cancelled."
             return 0, ""
 
-        with mock.patch.object(core, "run", fake_run):
-            result = core.install_home()
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            with mock.patch.object(core, "run", fake_run), \
+                    mock.patch.multiple(core, HOME_DIR=root, CONFIG=root / "config.json",
+                                        INSTALLED=root / "job.plist", VERSION_FILE=root / ".version"), \
+                    mock.patch.object(core, "status", return_value={}):
+                result = core.install_home()
         by_name = {s["step"]: s for s in result["steps"]}
         self.assertTrue(by_name["install the launchd job"]["ok"])
         self.assertFalse(by_name["schedule the daily wake"]["ok"])

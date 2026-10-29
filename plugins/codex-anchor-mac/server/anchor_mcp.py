@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import anchor_core as core
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 PROTOCOLS = ["2026-01-26", "2025-06-18"]
 PANEL = pathlib.Path(__file__).resolve().parent.parent / "ui" / "dist" / "panel.html"
 PANEL_URI = f"ui://codex-anchor-mac/panel-{VERSION}.html"
@@ -113,6 +113,14 @@ def call_tool(name: str, args: dict) -> dict:
         except ValueError as exc:
             return _text({"error": str(exc)})
     if name == "anchor_toggle":
+        prep_service = core.SERVICE + ".prepare"
+        if args.get("enable"):
+            core.run(["launchctl", "enable", prep_service])
+            prep_rc, prep_out = core.run(["launchctl", "bootstrap", f"gui/{core.UID}",
+                                         str(core.preparation_path())])
+        else:
+            core.run(["launchctl", "disable", prep_service])
+            prep_rc, prep_out = core.run(["launchctl", "bootout", prep_service])
         if args.get("enable"):
             core.run(["launchctl", "enable", core.SERVICE])
             rc, out = core.run(["launchctl", "bootstrap", f"gui/{core.UID}",
@@ -120,7 +128,7 @@ def call_tool(name: str, args: dict) -> dict:
         else:
             core.run(["launchctl", "disable", core.SERVICE])
             rc, out = core.run(["launchctl", "bootout", core.SERVICE])
-        return _text({"ok": rc == 0, "detail": out, "status": core.status()})
+        return _text({"ok": rc == 0 and prep_rc == 0, "detail": out or prep_out, "status": core.status()})
     if name == "anchor_run_now":
         if core.agent_state()["running"]:
             return _text({"ok": False, "detail": "An anchor request is already running.",

@@ -50,6 +50,7 @@ class ExecutionArguments(unittest.TestCase):
                                          "CAFFEINATE": str(caffeinate)},
                                     capture_output=True, text=True, timeout=10)
             args = json.loads((root / "argv.json").read_text()) if (root / "argv.json").exists() else None
+            self.assertTrue((root / ".last-run-finished").exists())
             log = (root / "anchor.log").read_text()
             return result.returncode, args, log
 

@@ -31,7 +31,7 @@ SERVICE = f"gui/{UID}/{LABEL}"
 # pmset must wake the Mac slightly before launchd fires, or a battery night
 # misses the trigger entirely.
 WAKE_LEAD_MINUTES = 3
-PLUGIN_VERSION = "0.1.6"
+PLUGIN_VERSION = "0.1.7"
 VERSION_FILE = HOME_DIR / ".version"
 REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 
@@ -307,6 +307,31 @@ def wake_time(hour: int, minute: int) -> tuple[int, int]:
     return divmod(total, 60)
 
 
+def preparation_path() -> pathlib.Path:
+    return INSTALLED.with_name(f"{LABEL}.prepare.plist")
+
+
+def install_preparation_job(main: dict) -> tuple[int, str]:
+    """Start a bounded awake assertion at the same time as the pmset wake."""
+    data = plistlib.loads(plistlib.dumps(main))
+    hour, minute = wake_time(int(main["StartCalendarInterval"]["Hour"]),
+                             int(main["StartCalendarInterval"]["Minute"]))
+    data.update({"Label": LABEL + ".prepare",
+                 "ProgramArguments": ["/bin/bash", str(HOME_DIR / "anchor.sh"), "--prepare"],
+                 "StartCalendarInterval": {"Hour": hour, "Minute": minute},
+                 "ProcessType": "Standard",
+                 "StandardOutPath": str(HOME_DIR / "prepare.out.log"),
+                 "StandardErrorPath": str(HOME_DIR / "prepare.err.log")})
+    destination = preparation_path()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(plistlib.dumps(data))
+    service = SERVICE + ".prepare"
+    run(["launchctl", "bootout", service])
+    rc, out = run(["launchctl", "bootstrap", f"gui/{UID}", str(destination)])
+    run(["launchctl", "enable", service])
+    return rc, out
+
+
 def agent_state() -> dict:
     """Structured, not prose: the UI renders it in whichever language is on."""
     rc, out = run(["launchctl", "print", SERVICE])
@@ -433,6 +458,10 @@ def set_schedule(hour: int, minute: int, tz_name: str) -> list[dict]:
     step("reload launchd", rc == 0, out)
     run(["launchctl", "enable", SERVICE])
 
+    with INSTALLED.open("rb") as fh:
+        rc, out = install_preparation_job(plistlib.load(fh))
+    step("install wake preparation", rc == 0, out or f"{wh:02d}:{wm:02d}")
+
     rc, out = schedule_wake(wh, wm)
     step("update pmset wake", rc == 0,
          f"set to {wh:02d}:{wm:02d}" if rc == 0 else
@@ -513,6 +542,10 @@ def install_home() -> dict:
          out or f"{local_h:02d}:{local_m:02d} system time")
 
     wh, wm = wake_time(local_h, local_m)
+    with INSTALLED.open("rb") as fh:
+        rc, out = install_preparation_job(plistlib.load(fh))
+    step("install wake preparation", rc == 0, out or f"{wh:02d}:{wm:02d}")
+
     rc, out = schedule_wake(wh, wm)
     step("schedule the daily wake", rc == 0,
          f"{wh:02d}:{wm:02d}" if rc == 0
@@ -523,6 +556,8 @@ def install_home() -> dict:
 
 def uninstall() -> dict:
     steps: list[dict] = []
+    run(["launchctl", "bootout", SERVICE + ".prepare"])
+    preparation_path().unlink(missing_ok=True)
     _, out = run(["launchctl", "bootout", SERVICE])
     steps.append({"step": "unload the launchd job", "ok": True, "detail": out})
     try:

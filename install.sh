@@ -63,6 +63,18 @@ launchctl bootout "gui/$UID/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$UID" "$TARGET"
 launchctl enable "gui/$UID/$LABEL"
 
+# Share rendering logic with panel installs, including midnight rollover.
+/usr/bin/python3 - "$PLUGIN_DIR/server" "$TARGET" <<'PYPREPARE'
+import pathlib, plistlib, sys
+sys.path.insert(0, sys.argv[1])
+import anchor_core
+anchor_core.INSTALLED = pathlib.Path(sys.argv[2])
+with anchor_core.INSTALLED.open("rb") as source:
+    rc, detail = anchor_core.install_preparation_job(plistlib.load(source))
+if rc:
+    raise SystemExit(detail or "could not install wake preparation")
+PYPREPARE
+
 echo
 if [ "${SKIP_WAKE:-0}" = "1" ]; then
   echo "==> daily wake skipped (--no-wake)"

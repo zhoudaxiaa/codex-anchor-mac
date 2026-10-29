@@ -37,6 +37,67 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:$PATH"
 
 log() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S %z')" "$*" >>"$LOG"; }
 
+# The preparation job is launched at the pmset wake time, not at request time.
+# Acquire the idle assertion before parsing config or waiting for the main job.
+if [ "${1:-}" = "--prepare" ]; then
+  exec "$CAFFEINATE" -i -s /bin/bash "${BASH_SOURCE[0]}" --prepare-held
+fi
+if [ "${1:-}" = "--prepare-held" ]; then
+  # pmset's scheduled wake also reports UserIsActive=1 for a few seconds.
+  # Only an actual WindowServer input assertion means someone is using the Mac.
+  if ! "$PMSET" -g assertions 2>/dev/null | grep -qE 'WindowServer.*UserIsActive'; then
+    "$CAFFEINATE" -u -t 1 2>/dev/null
+    "$PMSET" displaysleepnow 2>/dev/null
+  fi
+  /usr/bin/python3 - "$DIR" "$TIMEOUT_SECS" <<'PYPREPARE'
+import json, pathlib, sys, time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+
+def request_target(now, cfg):
+    zone = ZoneInfo(cfg["timezone"]) if cfg.get("timezone") else now.tzinfo
+    local = now.astimezone(zone)
+    target = local.replace(hour=int(cfg.get("hour", 4)),
+                           minute=int(cfg.get("minute", 30)), second=0, microsecond=0)
+    # 23:57 prepares tomorrow's 00:00 request; a delayed wake must not wait a day.
+    return min((target + timedelta(days=d) for d in (-1, 0, 1)),
+               key=lambda candidate: abs(candidate.timestamp() - now.timestamp())).timestamp()
+
+
+def wait_for_request(target, finished, timeout, clock=time.time,
+                     monotonic=time.monotonic, sleep=time.sleep):
+    started = clock()
+    if not -timeout - 90 <= target - started <= 210:
+        return "outside preparation window"
+    budget = max(0, target - started) + timeout + 90
+    end = monotonic() + budget
+    while clock() < target + timeout + 90 and monotonic() < end:
+        # Written on every request exit, including failure. A stale lock cannot
+        # hold the machine awake forever, and a very fast request is not missed.
+        if clock() >= target:
+            try:
+                if finished.stat().st_mtime >= target:
+                    return "request finished"
+            except FileNotFoundError:
+                pass
+        sleep(min(1, max(0.01, end - monotonic())))
+    return "preparation timeout"
+
+
+if __name__ == "__main__":
+    root = pathlib.Path(sys.argv[1])
+    cfg = json.loads((root / "config.json").read_text(encoding="utf-8"))
+    # astimezone() obtains this Mac's current local offset for legacy configs.
+    now = datetime.now().astimezone()
+    target = request_target(now, cfg)
+    print(f"{now.isoformat()} prepare request at {datetime.fromtimestamp(target).isoformat()}", flush=True)
+    result = wait_for_request(target, root / ".last-run-finished", int(sys.argv[2]))
+    print(f"{datetime.now().astimezone().isoformat()} {result}", flush=True)
+PYPREPARE
+  exit $?
+fi
+
 # launchd appends to this file forever, so a failure from weeks ago keeps
 # looking like the current state. Reset it; this run owns its contents.
 : > "$DIR/launchd.err.log" 2>/dev/null || true
@@ -51,7 +112,12 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   log "SKIP  another anchor run is already in progress"
   exit 0
 fi
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+cleanup() {
+  touch "$DIR/.last-run-finished"
+  rmdir "$LOCK" 2>/dev/null
+}
+trap cleanup EXIT
+log "START request"
 
 if [ -z "$CODEX" ] || [ ! -x "$CODEX" ]; then
   log "FAIL  codex binary not found (set CODEX_BIN to override)"

@@ -1,7 +1,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 import { STR, type Lang } from './strings';
 
-const app = new App({ name: 'codex-anchor-mac', version: '0.1.6' });
+const app = new App({ name: 'codex-anchor-mac', version: '0.1.7' });
 let st: any = null;
 let executionDirty = false;
 let executionSaving = false;
